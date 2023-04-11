@@ -1,0 +1,53 @@
+import cv2
+import numpy as np
+import os
+from tensorflow.python.keras.models import load_model
+
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
+
+def load_data(data_dir1):
+    images = []
+    name = []
+
+    for filename in os.listdir(data_dir1):
+        file = os.path.join(data_dir1, filename)
+        file = cv2.imread(file)
+        file = cv2.cvtColor(file, cv2.COLOR_BGR2RGB)  # 转换为RGB
+        file = cv2.resize(file, (128, 128))
+        # 将图像进行 min-max 归一化
+        min_val = np.min(file)  # 计算图像的最小值
+        max_val = np.max(file)  # 计算图像的最大值
+        file = (file - min_val) / (max_val - min_val)
+        images.append(file)
+        name.append(filename)
+
+    # 将图像转换为numpy数组
+    images = np.array(images)
+
+    return images,name
+
+
+# 加载保存的模型文件
+model = load_model('my_model.h5')
+
+# 加载预测图像
+dirpath = r'D:\SourceCode\Pycharm_workspace\thyroid nodule'
+img, filename = load_data(dirpath)
+
+# 进行预测
+prediction = model.predict(img)
+
+# 将预测结果转换为分割图像
+L = len(prediction)
+for i in range(L):
+    binary_output = np.where(prediction[i] > 0.95, 1, 0)   # 将大于0.5的取为前景
+    binary_output = np.squeeze(binary_output)  # 去掉多余的维度
+    binary_output = binary_output.astype(np.uint8)  # 数据类型转换为 uint8
+    # 使用形态学操作消除噪声和毛刺
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    binary_output = cv2.erode(binary_output, kernel, iterations=1)
+    binary_output = cv2.dilate(binary_output, kernel, iterations=1)
+    name = r'D:\SourceCode\Pycharm_workspace\result/'+'(0.95)'+filename[i]
+    # 处理之后，可以将二值化图像保存到文件中
+    cv2.imwrite(name, binary_output * 255)
