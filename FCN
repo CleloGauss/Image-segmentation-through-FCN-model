@@ -1,0 +1,125 @@
+import tensorflow as tf
+import cv2
+import numpy as np
+import os
+from keras.optimizers import Adam
+
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
+
+# 构建FCN模型
+def fcn_model(input_shape, num_classes):
+    # 定义输入层
+    inputs = tf.keras.layers.Input(shape=input_shape)
+
+    # 定义卷积层
+    conv1 = tf.keras.layers.Conv2D(32, (3, 3), activation='relu', padding='same')(inputs)
+    conv2 = tf.keras.layers.Conv2D(32, (3, 3), activation='relu', padding='same')(conv1)
+
+    # 定义池化层
+    pool1 = tf.keras.layers.MaxPooling2D((2, 2))(conv2)
+
+    # 定义更深的卷积层和池化层
+    conv3 = tf.keras.layers.Conv2D(64, (3, 3), activation='relu', padding='same')(pool1)
+    conv4 = tf.keras.layers.Conv2D(64, (3, 3), activation='relu', padding='same')(conv3)
+    pool2 = tf.keras.layers.MaxPooling2D((2, 2))(conv4)
+
+    # 定义更深的卷积层
+    conv5 = tf.keras.layers.Conv2D(128, (3, 3), activation='relu', padding='same')(pool2)
+    conv6 = tf.keras.layers.Conv2D(128, (3, 3), activation='relu', padding='same')(conv5)
+
+    # 定义反卷积层
+    up1 = tf.keras.layers.Conv2DTranspose(64, (3, 3), strides=(2, 2), padding='same')(conv6)
+
+    # 将反卷积层与卷积层进行连接
+    merge1 = tf.keras.layers.concatenate([conv4, up1], axis=3)
+    conv7 = tf.keras.layers.Conv2D(64, (3, 3), activation='relu', padding='same')(merge1)
+    conv8 = tf.keras.layers.Conv2D(64, (3, 3), activation='relu', padding='same')(conv7)
+
+    # 定义更深的反卷积层
+    up2 = tf.keras.layers.Conv2DTranspose(32, (3, 3), strides=(2, 2), padding='same')(conv8)
+
+    # 将反卷积层与卷积层进行连接
+    merge2 = tf.keras.layers.concatenate([conv2, up2], axis=3)
+    conv9 = tf.keras.layers.Conv2D(32, (3, 3), activation='relu', padding='same')(merge2)
+    conv10 = tf.keras.layers.Conv2D(32, (3, 3), activation='relu', padding='same')(conv9)
+
+    # 定义输出层
+    outputs = tf.keras.layers.Conv2D(num_classes, (1, 1), activation='sigmoid', padding='same')(conv10)
+
+    # 创建模型
+    model = tf.keras.models.Model(inputs=inputs, outputs=outputs)
+
+    return model
+
+
+
+def load_data(data_dir1,data_dir2):
+    images = []
+    labels = []
+
+    # 图像和标签分类
+    for filename in os.listdir(data_dir1):
+        file = os.path.join(data_dir1, filename)
+        file = cv2.imread(file)
+        file = cv2.cvtColor(file, cv2.COLOR_BGR2RGB)  # 转换为RGB
+        file = cv2.resize(file, (128, 128))
+        # 将图像进行 min-max 归一化
+        min_val = np.min(file)  # 计算图像的最小值
+        max_val = np.max(file)  # 计算图像的最大值
+        file = (file - min_val) / (max_val - min_val)
+        images.append(file)
+
+    for filename in os.listdir(data_dir2):
+        file = os.path.join(data_dir2, filename)
+        file = cv2.imread(file)
+        file = cv2.cvtColor(file, cv2.COLOR_BGR2RGB)  # 转换为RGB
+        file = cv2.resize(file, (128, 128))
+        file = (file // 255).astype(np.float32)
+        labels.append(file)
+
+    # 将图像和标签转换为numpy数组
+    images = np.array(images)
+    labels = np.array(labels)
+
+    # 将标签数据的通道数从3改为1
+    if len(labels) > 0:
+        labels = labels[..., 0]
+
+    return images, labels
+
+
+# 准备数据集
+dirpath1 = r'D:\SourceCode\Pycharm_workspace\augtrain\image'
+dirpath2 = r'D:\SourceCode\Pycharm_workspace\augtrain\mask'
+# 定义图像和标签
+x_train, y_train = load_data(dirpath1, dirpath2)
+
+# 构建模型
+input_shape = (128, 128, 3)
+num_classes = 1  # 分类数
+model = fcn_model(input_shape, num_classes)
+
+# 编译模型
+model.compile(
+    optimizer=Adam(learning_rate=0.001),  # 使用Adam优化器. 学习率过小->收敛过慢；学习率过大->错过局部最优
+    loss='binary_crossentropy',  # 配置损失函数，该函数适用于二分类，即标签数为1的情况
+    metrics=['accuracy']  # 标注准确性评价指标
+)
+
+# 训练模型
+# epochs(训练轮数)：训练出来合适的权重
+# 定义验证集
+dirpath3 = r'D:\SourceCode\Pycharm_workspace\augtrain\image1'
+dirpath4 = r'D:\SourceCode\Pycharm_workspace\augtrain\mask1'
+x_val, y_val = load_data(dirpath3, dirpath4)
+callback = tf.keras.callbacks.EarlyStopping(
+    monitor='val_loss',  # 待监测的指标
+    patience=5,     # 如果连续5个epoch验证集上的指标都没有改善，则停止训练
+    verbose=0, mode='auto'
+)
+model.fit(x_train, y_train, epochs=100, validation_data=(x_val, y_val), callbacks=[callback])
+
+# 保存模型
+model.save('my_model.h5')
+
